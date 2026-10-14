@@ -1,4 +1,7 @@
 import { CiyuanService } from './ciyuan/service';
+import { GitSyncService } from './gitSync/service';
+import { generateAiCommitMessage } from './gitSync/commitMessage';
+import { runGitSyncAction, runGitSyncPush } from './ui/gitSyncSettings';
 import {
   apiVersion,
   type App,
@@ -6,6 +9,7 @@ import {
   Notice,
   Plugin,
   TFile,
+  type TAbstractFile,
   WorkspaceLeaf,
 } from 'obsidian';
 
@@ -64,6 +68,9 @@ import {
   type UpdateState,
 } from './update/updateService';
 
+// 飞书 refresh token 有效期约 7 天，定期刷新可让授权持续顺延。
+const FEISHU_KEEP_ALIVE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 interface AppWithSettings extends App {
   setting?: {
     open(): void;
@@ -96,6 +103,7 @@ export default class WeSightPlugin extends Plugin {
   knowledgeBrain!: KnowledgeBrain;
   knowledgeBrainEntitlement!: KnowledgeBrainEntitlementService;
   updateService!: UpdateService;
+  gitSync!: GitSyncService;
   private shareActions = new WeakMap<MarkdownView, HTMLElement>();
   private xiaohongshuActions = new WeakMap<MarkdownView, HTMLElement>();
   private knowledgeActions = new WeakMap<MarkdownView, HTMLElement>();
@@ -110,6 +118,13 @@ export default class WeSightPlugin extends Plugin {
     );
     await this.loadTemplateThemeDefinitions();
     await this.loadSettings();
+    this.gitSync = new GitSyncService({
+      vaultPath: getVaultBasePath(this.app),
+      configDir: this.app.vault.configDir,
+      notify: message => { new Notice(message, 10_000); },
+      generateCommitMessage: (diffs, signal) => generateAiCommitMessage(this.runtimeManager, this.settings, diffs, signal),
+    });
+    await this.gitSync.initialize();
     this.updateService = new UpdateService({
       currentVersion: this.manifest.version,
       currentAppVersion: apiVersion,
@@ -201,6 +216,8 @@ export default class WeSightPlugin extends Plugin {
         knowledgeBrain: this.knowledgeBrain,
         knowledgeBrainEntitlement: this.knowledgeBrainEntitlement,
         updateService: this.updateService,
+        gitSync: this.gitSync,
+        openGitSyncSettings: () => this.openSettings('gitSync'),
         auth: this.cloudAuth,
         memberAi: this.memberAi,
         claudeInstaller: this.claudeInstaller,
@@ -264,6 +281,38 @@ export default class WeSightPlugin extends Plugin {
       id: 'open-chat',
       name: 'Open chat',
       callback: () => void this.activateView(),
+    });
+    this.addCommand({
+      id: 'git-sync-pull',
+      name: '立即拉取当前仓库',
+      callback: () => void runGitSyncAction(() => this.gitSync.pull()),
+    });
+    this.addCommand({
+      id: 'git-sync-push',
+      name: '推送当前仓库提交',
+      callback: () => void runGitSyncPush(this.app, this.gitSync),
+    });
+    this.addCommand({
+      id: 'git-sync-check',
+      name: '检查当前仓库远程更新',
+      callback: () => void runGitSyncAction(() => this.gitSync.check()),
+    });
+    this.addCommand({
+      id: 'git-sync-settings',
+      name: '打开仓库同步设置',
+      callback: () => this.openSettings('gitSync'),
+    });
+    const markGitActivity = (file: TAbstractFile): void => this.gitSync.markActivity(file.path);
+    this.registerEvent(this.app.vault.on('create', markGitActivity));
+    this.registerEvent(this.app.vault.on('modify', markGitActivity));
+    this.registerEvent(this.app.vault.on('delete', markGitActivity));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      this.gitSync.markActivity(oldPath);
+      this.gitSync.markActivity(file.path);
+    }));
+    this.app.workspace.onLayoutReady(() => {
+      void this.gitSync.onVaultOpened();
+      this.registerInterval(window.setInterval(() => void this.gitSync.tick(), 15_000));
     });
 
     this.addCommand({
@@ -406,12 +455,18 @@ export default class WeSightPlugin extends Plugin {
     });
 
     this.app.workspace.onLayoutReady(() => this.installMarkdownShareActions());
+    this.app.workspace.onLayoutReady(() => void this.openChatViewOnFirstRun());
     this.app.workspace.onLayoutReady(() => {
       const intervalId = startUpdatePolling(
         () => this.updateService.checkForUpdates(),
         (handler, timeout) => window.setInterval(handler, timeout),
       );
       this.registerInterval(intervalId);
+    });
+    this.app.workspace.onLayoutReady(() => {
+      const keepFeishuAlive = () => { void this.larkCli.keepAlive().catch(() => undefined); };
+      keepFeishuAlive();
+      this.registerInterval(window.setInterval(keepFeishuAlive, FEISHU_KEEP_ALIVE_INTERVAL_MS));
     });
     this.registerEvent(this.app.workspace.on('layout-change', () => this.installMarkdownShareActions()));
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.installMarkdownShareActions()));
@@ -431,11 +486,14 @@ export default class WeSightPlugin extends Plugin {
       wechatApi: this.wechatCloudApi,
       knowledgeBrain: this.knowledgeBrain,
       knowledgeBrainEntitlement: this.knowledgeBrainEntitlement,
+      larkCli: this.larkCli,
+      gitSync: this.gitSync,
     });
     this.addSettingTab(this.settingTab);
   }
 
   override onunload(): void {
+    this.gitSync?.dispose();
     this.memberAi?.close();
     this.claudeInstaller?.cancel();
     this.tokenDance?.close();
@@ -458,7 +516,8 @@ export default class WeSightPlugin extends Plugin {
       await this.app.workspace.revealLeaf(existing);
       return;
     }
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.app.workspace.getRightLeaf(false)
+      ?? this.app.workspace.getRightLeaf(true);
     await leaf?.setViewState({
       type: WESIGHT_VIEW_TYPE,
       active: true,
@@ -466,6 +525,15 @@ export default class WeSightPlugin extends Plugin {
     if (leaf) {
       await this.app.workspace.revealLeaf(leaf);
     }
+  }
+
+  private async openChatViewOnFirstRun(): Promise<void> {
+    if (this.settings.chatViewAutoOpened) return;
+    if (!this.app.workspace.getLeavesOfType(WESIGHT_VIEW_TYPE).length) {
+      await this.activateView();
+    }
+    this.settings.chatViewAutoOpened = true;
+    await this.saveData(this.settings);
   }
 
   async activateWeChatPreview(file: TFile): Promise<void> {
@@ -618,7 +686,7 @@ export default class WeSightPlugin extends Plugin {
     ).open();
     return false;
   }
-  private openSettings(tab?: 'general'): void {
+  private openSettings(tab?: 'general' | 'gitSync'): void {
     const setting = (this.app as AppWithSettings).setting;
     if (setting) {
       setting.open();
@@ -718,6 +786,10 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     lastNotifiedUpdateVersion: typeof value?.lastNotifiedUpdateVersion === 'string'
       ? value.lastNotifiedUpdateVersion
       : '',
+    // 已有设置数据的老用户视为已打开过，升级后不会被突然弹出侧边栏。
+    chatViewAutoOpened: typeof value?.chatViewAutoOpened === 'boolean'
+      ? value.chatViewAutoOpened
+      : Boolean(value),
     configSources: memberAiConfigSources(value),
     memberAiModel: typeof value?.memberAiModel === 'string' ? value.memberAiModel : '',
     memberAiConsentUserId: typeof value?.memberAiConsentUserId === 'string' ? value.memberAiConsentUserId : '',

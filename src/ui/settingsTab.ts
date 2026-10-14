@@ -37,8 +37,14 @@ import { renderTokenDanceSettings } from './tokenDanceSettings';
 import type { MemberAiService } from '../memberAi/service';
 import type { ClaudeInstaller } from '../memberAi/installer';
 import { renderMemberAiCard } from './memberAiCard';
+import { ConnectorsSettings } from './connectorsSettings';
+import type { GitSyncService } from '../gitSync/service';
+import { GitSyncSettingsPanel } from './gitSyncSettings';
+import { ReleaseNotesModal } from './releaseNotesModal';
+import type { LarkCliService } from '../feishu/larkCli';
 
 interface SettingsTabDeps {
+  gitSync: GitSyncService;
   memberAi: MemberAiService;
   claudeInstaller: ClaudeInstaller;
   tokenDance: TokenDanceService;
@@ -52,9 +58,10 @@ interface SettingsTabDeps {
   wechatApi: WeChatCloudApi;
   knowledgeBrain: KnowledgeBrain;
   knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
+  larkCli: LarkCliService;
 }
 
-type SettingsTabId = 'general' | AgentId;
+type SettingsTabId = 'general' | 'gitSync' | AgentId;
 type ProviderApiFormat = 'anthropic' | 'openai';
 
 const RUNTIME_SOURCE_LABELS: Record<RuntimeBinarySource, string> = {
@@ -259,10 +266,14 @@ export class WeSightSettingTab extends PluginSettingTab {
   private disposeMemberCard?: () => void;
   private disposeCiyuan?: () => void;
   private readonly publishingSettings: WeChatPublishingSettings;
+  private readonly connectorsSettings: ConnectorsSettings;
+  private readonly gitSyncSettings: GitSyncSettingsPanel;
+  private readonly currentPluginVersion: string;
   private knowledgeStatusListener: ((event: { message?: string }) => void) | null = null;
 
   constructor(app: App, plugin: Plugin, private readonly deps: SettingsTabDeps) {
     super(app, plugin);
+    this.currentPluginVersion = plugin.manifest.version;
     this.publishingSettings = new WeChatPublishingSettings({
       app,
       auth: deps.cloudAuth,
@@ -271,6 +282,8 @@ export class WeSightSettingTab extends PluginSettingTab {
       getSettings: () => deps.getSettings(),
       saveSettings: () => deps.saveSettings(),
     });
+    this.connectorsSettings = new ConnectorsSettings({ app, larkCli: deps.larkCli });
+    this.gitSyncSettings = new GitSyncSettingsPanel(deps.gitSync, app);
     plugin.register(deps.cloudAuth.onChange(() => {
       if (this.activeTab !== 'general') return;
       this.publishingSettings.activate(true);
@@ -288,6 +301,7 @@ export class WeSightSettingTab extends PluginSettingTab {
   }
 
   override display(): void {
+    this.gitSyncSettings.dispose();
     this.disposeMemberCard?.();this.disposeMemberCard=undefined;
     this.disposeCiyuan?.(); this.disposeCiyuan = undefined;
     if (this.knowledgeStatusListener) {
@@ -298,8 +312,14 @@ export class WeSightSettingTab extends PluginSettingTab {
     containerEl.empty();
     this.renderTabs(containerEl);
     const panel = containerEl.createDiv({ cls: 'wesight-settings-panel' });
+    if (this.activeTab === 'gitSync') {
+      this.gitSyncSettings.render(panel);
+      return;
+    }
     if (this.activeTab === 'general') {
       this.renderGeneral(panel);
+      this.connectorsSettings.render(panel);
+      this.connectorsSettings.activate();
       this.publishingSettings.render(panel);
       this.publishingSettings.activate();
       this.renderEnvironment(panel);
@@ -312,12 +332,14 @@ export class WeSightSettingTab extends PluginSettingTab {
   }
 
   override hide(): void {
+    this.gitSyncSettings.dispose();
     this.disposeMemberCard?.();this.disposeMemberCard=undefined;
     this.disposeCiyuan?.(); this.disposeCiyuan = undefined;
     if (this.knowledgeStatusListener) {
       this.deps.knowledgeBrain.off('status', this.knowledgeStatusListener);
       this.knowledgeStatusListener = null;
     }
+    this.connectorsSettings.dispose();
     super.hide();
   }
 
@@ -329,6 +351,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       { id: 'claude', label: 'Claude' },
       { id: 'codex', label: 'Codex' },
       { id: 'opencode', label: 'OpenCode' },
+      { id: 'gitSync', label: '仓库同步' },
     ];
     for (const entry of entries) {
       const tab = tabs.createEl('button', {
@@ -347,6 +370,10 @@ export class WeSightSettingTab extends PluginSettingTab {
   private renderGeneral(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
     const settings = this.deps.getSettings();
+    new Setting(section).setName(`WeSight ${this.currentPluginVersion}`)
+      .setDesc('查看本次更新和近期版本的功能变化。')
+      .addButton(button => button.setButtonText('版本更新说明')
+        .onClick(() => new ReleaseNotesModal(this.app, this.currentPluginVersion).open()));
 
     new Setting(section)
       .setName('Default agent')

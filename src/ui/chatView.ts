@@ -42,6 +42,9 @@ import type { MemberAiService } from '../memberAi/service';
 import type { ClaudeInstaller } from '../memberAi/installer';
 import { renderMemberAiCard } from './memberAiCard';
 import { addMemberAiUsageMenuItem } from './memberAiUsageMenuItem';
+import type { GitSyncService } from '../gitSync/service';
+import { addGitSyncMenuItems, GitSyncHistoryModal } from './gitSyncSettings';
+import { ReleaseNotesModal } from './releaseNotesModal';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
 import type { UpdateService, UpdateState } from '../update/updateService';
 import { RuntimeSetupModal } from './runtimeSetupModal';
@@ -64,6 +67,8 @@ const WESIGHT_TUTORIAL_URL =
   'https://my.feishu.cn/docx/Vy7wdUzhkoZpPhxgix4cYHELnie?from=from_copylink';
 
 export interface ChatViewDeps {
+  gitSync: GitSyncService;
+  openGitSyncSettings: () => void;
   memberAi: MemberAiService;
   claudeInstaller: ClaudeInstaller;
   getSettings: () => WeSightObsidianSettings;
@@ -851,6 +856,16 @@ export class WeSightChatView extends ItemView {
         },
       });
       login.onclick = () => this.deps.auth.startLogin();
+      const localAccount = this.accountSlotEl.createEl('button', {
+        cls: 'clickable-icon wesight-account-button',
+        attr: { type: 'button', 'aria-label': '打开本地账户与仓库同步菜单', 'aria-haspopup': 'menu' },
+      });
+      const avatar = localAccount.createSpan({ cls: 'wesight-account-avatar' });
+      setIcon(avatar, 'user-round');
+      localAccount.onclick = event => {
+        event.stopPropagation();
+        this.openLocalAccountMenu(localAccount);
+      };
       return;
     }
 
@@ -928,7 +943,12 @@ export class WeSightChatView extends ItemView {
       .setIsLabel(true));
     menu.addSeparator();
     this.addUpdateMenuItem(menu);
+    menu.addItem(item => item.setTitle('版本更新说明').setIcon('notebook-text')
+      .onClick(() => new ReleaseNotesModal(this.app, this.deps.updateService.getState().currentVersion).open()));
     const disposeUsage = addMemberAiUsageMenuItem(menu, this.deps.memberAi, this.deps.auth);
+    menu.addSeparator();
+    const disposeGitSync = addGitSyncMenuItems(menu, this.deps.gitSync, this.deps.openGitSyncSettings,
+      () => new GitSyncHistoryModal(this.app, this.deps.gitSync).open(), this.app);
     menu.addSeparator();
     menu.addItem(item => item
       .setTitle('账户详情')
@@ -958,6 +978,7 @@ export class WeSightChatView extends ItemView {
       }));
     menu.onHide(() => {
       disposeUsage();
+      disposeGitSync();
       if (this.accountMenu === menu) this.accountMenu = null;
     });
     const bounds = anchor.getBoundingClientRect();
@@ -967,6 +988,27 @@ export class WeSightChatView extends ItemView {
       left: true,
     });
     this.accountMenu = menu;
+    void this.deps.gitSync.refresh();
+  }
+
+  private openLocalAccountMenu(anchor: HTMLElement): void {
+    this.accountMenu?.hide();
+    const menu = new Menu().setUseNativeMenu(false);
+    menu.addItem(item => item.setTitle('版本更新说明').setIcon('notebook-text')
+      .onClick(() => new ReleaseNotesModal(this.app, this.deps.updateService.getState().currentVersion).open()));
+    menu.addSeparator();
+    const disposeGitSync = addGitSyncMenuItems(menu, this.deps.gitSync, this.deps.openGitSyncSettings,
+      () => new GitSyncHistoryModal(this.app, this.deps.gitSync).open(), this.app);
+    menu.addSeparator();
+    menu.addItem(item => item.setTitle('登录 WeSight').setIcon('log-in').onClick(() => this.deps.auth.startLogin()));
+    menu.onHide(() => {
+      disposeGitSync();
+      if (this.accountMenu === menu) this.accountMenu = null;
+    });
+    const bounds = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: bounds.right, y: bounds.bottom + 4, left: true });
+    this.accountMenu = menu;
+    void this.deps.gitSync.refresh();
   }
 
   private addUpdateMenuItem(menu: Menu): void {

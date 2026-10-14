@@ -9815,3 +9815,164 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
   .wesight-catalog-select { flex-wrap: wrap; }
   .wesight-catalog-badge { font-size: 9px; }
 }
+
+.wesight-connector-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+}
+
+.wesight-connector-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.wesight-connector-logo {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+
+.wesight-connector-logo img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.wesight-connector-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wesight-connector-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wesight-connector-copy > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.wesight-connector-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wesight-connector-badge.is-connected {
+  background: rgba(23, 105, 255, 0.12);
+  color: #1769ff;
+}
+
+.wesight-connector-badge.is-pending {
+  background: rgba(234, 121, 0, 0.12);
+  color: #ea7900;
+}
+
+.wesight-connector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wesight-connector-note {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.wesight-connector-error {
+  color: var(--text-error);
+  font-size: 12px;
+}
+
+.wesight-connector-auth {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.wesight-connector-auth-copy {
+  display: grid;
+  gap: 10px;
+}
+
+/* Current-vault Git collaboration, shared by settings and the avatar menu. */
+.wesight-git-menu-repo {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 220px;
+  max-width: 300px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.wesight-git-menu-heading { color: var(--text-faint); }
+.wesight-git-menu-summary {
+  max-width: 300px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.wesight-git-settings .is-error,
+.wesight-git-history .is-error,
+.wesight-git-menu-summary.is-error { color: var(--text-error); }
+.wesight-git-status,
+.wesight-git-preview {
+  padding: 16px;
+  margin: 12px 0 18px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+.wesight-git-repository,
+.wesight-git-preview-heading { font-weight: var(--font-medium); overflow-wrap: anywhere; }
+.wesight-git-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+}
+.wesight-git-counts { margin-top: 12px; font-size: var(--font-ui-small); }
+.wesight-git-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.wesight-git-advanced,
+.wesight-git-history { padding: 12px 0; }
+.wesight-git-advanced > summary,
+.wesight-git-history > summary { cursor: pointer; color: var(--text-muted); }
+.wesight-git-advanced textarea { min-height: 110px; max-width: 100%; }
+.wesight-git-path { font-size: var(--font-ui-small); overflow-wrap: anywhere; margin-top: 5px; }
+.wesight-git-history-entry { padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+@media (max-width: 600px) {
+  .wesight-git-settings .setting-item { flex-wrap: wrap; gap: 10px; }
+  .wesight-git-settings .setting-item-control { max-width: 100%; }
+  .wesight-git-settings input[type="text"] { max-width: 100%; }
+}
+.wesight-git-menu-automation { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-top: 4px; }
+.wesight-git-commit-content .setting-item { flex-wrap: wrap; gap: 10px; }
+.wesight-git-commit-content .setting-item-name { overflow-wrap: anywhere; }
+.wesight-git-commit-content .setting-item-control { max-width: 100%; }
+.wesight-git-commit-message { width: 300px; max-width: 100%; min-height: 100px; }
+
+.wesight-release-notes-modal { width: min(760px, 90vw); }
+.wesight-release-notes-current { color: var(--text-muted); font-size: var(--font-ui-small); margin-bottom: 12px; }
+.wesight-release-notes .setting-item { flex-wrap: wrap; gap: 10px; }
+.wesight-release-notes .setting-item-control { max-width: 100%; }
+.wesight-release-notes select { max-width: 100%; }
+.wesight-release-notes-body { overflow-wrap: anywhere; }
+.wesight-release-notes-body h1 { font-size: var(--h2-size); }

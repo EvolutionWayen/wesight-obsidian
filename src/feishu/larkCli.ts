@@ -120,6 +120,8 @@ interface LarkAuthStatus {
       userName?: string;
       tokenStatus?: string;
       scope?: string | string[];
+      expiresAt?: string;
+      refreshExpiresAt?: string;
     };
   };
 }
@@ -301,6 +303,24 @@ function requestedScopesFromPayload(payload: unknown): string[] {
   );
 }
 
+type LarkUserIdentity = NonNullable<NonNullable<LarkAuthStatus['identities']>['user']>;
+
+const USABLE_USER_STATUSES = new Set(['ready', 'needs_refresh']);
+const UNUSABLE_TOKEN_STATUSES = new Set(['expired', 'invalid', 'missing', 'revoked']);
+
+// access token 约 2 小时过期，过期后 CLI 报告 needs_refresh；只要 refresh token
+// 仍有效，下一次用户身份调用就会自动续期，因此不应要求用户重新扫码。
+export function isLarkUserTokenUsable(
+  user: LarkUserIdentity | undefined,
+  now = Date.now(),
+): boolean {
+  if (!user || user.available !== true) return false;
+  if (!USABLE_USER_STATUSES.has(user.status ?? '')) return false;
+  if (UNUSABLE_TOKEN_STATUSES.has(user.tokenStatus?.toLowerCase() ?? '')) return false;
+  const refreshExpiresAt = user.refreshExpiresAt ? Date.parse(user.refreshExpiresAt) : Number.NaN;
+  return !Number.isFinite(refreshExpiresAt) || refreshExpiresAt > now;
+}
+
 export function missingLarkScopes(
   expectedScopes: Iterable<string>,
   grantedScopes: Iterable<string>,
@@ -348,6 +368,11 @@ export function buildLarkAuthorizationArgs(): string[] {
 
 export function buildLarkAuthStatusArgs(): string[] {
   return ['auth', 'status', '--json', '--verify'];
+}
+
+// 一次轻量的用户身份调用即可触发 CLI 自动刷新 token，并顺延 refresh token 有效期。
+export function buildLarkRefreshSessionArgs(): string[] {
+  return ['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user'];
 }
 
 export function buildFeishuCreateDocumentArgs(parentToken: string): string[] {
@@ -605,10 +630,10 @@ export class LarkCliService extends EventEmitter {
       const user = status.identities?.user;
       const grantedScopes = scopesForStatus(status);
       const capabilities = this.capabilitiesForScopes(grantedScopes);
-      const tokenStatus = user?.tokenStatus?.toLowerCase() ?? '';
-      const tokenReady = user?.available === true
-        && user.status === 'ready'
-        && !['expired', 'invalid', 'missing', 'revoked'].includes(tokenStatus);
+      const tokenReady = isLarkUserTokenUsable(user);
+      if (tokenReady && user?.status === 'needs_refresh') {
+        await this.refreshUserSession(discovered.path);
+      }
 
       if (!tokenReady) {
         return {
@@ -716,6 +741,22 @@ export class LarkCliService extends EventEmitter {
         message: error instanceof Error ? error.message : '检测飞书连接失败',
       };
     }
+  }
+
+  /**
+   * 后台保活：已授权时定期刷新用户 token，让 refresh token 持续顺延，
+   * 避免长时间未使用后需要重新扫码。返回当前用户授权是否仍可用。
+   */
+  async keepAlive(): Promise<boolean> {
+    if (this.activeChild || this.pendingDeviceCode) return true;
+    if (!this.readAuthorizationRecord()) return false;
+    const cliPath = this.discoverCli().path;
+    if (!cliPath) return false;
+    const statusResult = await this.run(['auth', 'status', '--json'], { command: cliPath });
+    if (statusResult.code !== 0) return false;
+    const status = (extractJson(statusResult.stdout) ?? {}) as LarkAuthStatus;
+    if (!isLarkUserTokenUsable(status.identities?.user)) return false;
+    return this.refreshUserSession(cliPath);
   }
 
   async disconnect(): Promise<void> {
@@ -950,6 +991,11 @@ export class LarkCliService extends EventEmitter {
         REQUIRED_SCOPES.drive.every(scope => grantedScopes.has(scope)),
       ),
     };
+  }
+
+  private async refreshUserSession(cliPath: string): Promise<boolean> {
+    const result = await this.run(buildLarkRefreshSessionArgs(), { command: cliPath });
+    return result.code === 0;
   }
 
   private async readGrantedScopes(cliPath: string): Promise<Set<string>> {

@@ -13,6 +13,14 @@ WeSight detects existing executables from the configured path, the system path, 
 
 ## Features
 
+### 1.3.0 release
+
+The [1.3.0 update](docs/releases/1.3.0.md) adds GitHub collaboration, selectable manual commits, local and AI-generated commit messages, Feishu connector settings and session refresh, and first-install sidebar opening. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
+
+### GitHub team collaboration
+
+The WeSight avatar menu provides current-repository status, **立即拉取**, **推送提交**, sync settings, and recent activity. **Settings → WeSight → 仓库同步** configures optional automatic pull, push, idle commits, and pull on vault open. Automation starts disabled and is saved per vault on each device, outside the shared vault. Existing Git credentials and upstream branches are reused. Local edits and conflicts pause the affected operations; independent team changes can merge normally. See [GitHub collaboration](docs/git-sync.md) for scope, configuration, and recovery.
+
 ### Article-to-social workbench (1.0.0)
 
 Use **转为图文** in the WeSight header, note toolbar, file menu, or command palette to open the right-side workbench while keeping the original note visible. **快速转** prepares Xiaohongshu, Weibo image posts, and Jike posts with shared or platform-specific copy. Review copy in place, select/reorder original article images, or open a platform tab for detailed editing.

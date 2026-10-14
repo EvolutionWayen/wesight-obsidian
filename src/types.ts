@@ -294,6 +294,8 @@ export interface WeSightObsidianSettings {
   defaultAgentId: AgentId;
   /** Latest plugin version already announced in this vault. */
   lastNotifiedUpdateVersion?: string;
+  /** Whether the chat sidebar has been opened automatically after first install. */
+  chatViewAutoOpened: boolean;
   configSources: ConfigSourcesByAgent;
   configuredPaths: ConfiguredPathsByAgent;
   providerProfileByAgent: ProfileSelectionByAgent;
@@ -346,6 +348,7 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   memberAiConsentUserId: '',
   defaultAgentId: 'claude',
   lastNotifiedUpdateVersion: '',
+  chatViewAutoOpened: false,
   configSources: DEFAULT_CONFIG_SOURCES,
   configuredPaths: DEFAULT_CONFIGURED_PATHS,
   providerProfileByAgent: DEFAULT_PROFILE_SELECTION,

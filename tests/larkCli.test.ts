@@ -7,6 +7,8 @@ import {
   buildFeishuUpdateDocumentArgs,
   buildLarkAuthStatusArgs,
   buildLarkAuthorizationArgs,
+  buildLarkRefreshSessionArgs,
+  isLarkUserTokenUsable,
   isValidLarkAuthorizationRecord,
   LarkCliService,
   missingLarkScopes,
@@ -15,6 +17,25 @@ import {
 import {
   larkCliAuthorizationRecordPath,
 } from '../src/paths';
+
+const ALL_REQUIRED_SCOPES = [
+  'im:chat:read',
+  'im:message:readonly',
+  'im:message.send_as_user',
+  'docx:document:create',
+  'docx:document:readonly',
+  'docx:document:write_only',
+  'docs:document.media:upload',
+  'base:app:read',
+  'base:record:read',
+  'base:table:read',
+  'calendar:calendar:read',
+  'calendar:calendar.event:read',
+  'calendar:calendar.event:create',
+  'calendar:calendar.event:update',
+  'drive:drive.metadata:readonly',
+  'space:folder:create',
+];
 
 describe('LarkCliService commands', () => {
   const tempDirs: string[] = [];
@@ -82,24 +103,7 @@ describe('LarkCliService commands', () => {
   test('recovers an existing full authorization when the local record is missing', async () => {
     const env = createSystemCliFixture(tempDirs);
     const cli = new LarkCliService(env);
-    const grantedScopes = [
-      'im:chat:read',
-      'im:message:readonly',
-      'im:message.send_as_user',
-      'docx:document:create',
-      'docx:document:readonly',
-      'docx:document:write_only',
-      'docs:document.media:upload',
-      'base:app:read',
-      'base:record:read',
-      'base:table:read',
-      'calendar:calendar:read',
-      'calendar:calendar.event:read',
-      'calendar:calendar.event:create',
-      'calendar:calendar.event:update',
-      'drive:drive.metadata:readonly',
-      'space:folder:create',
-    ];
+    const grantedScopes = ALL_REQUIRED_SCOPES;
     Reflect.set(cli, 'run', buildConnectionRunner(grantedScopes, grantedScopes));
 
     const beforeRecord = await cli.getConnectionState();
@@ -193,6 +197,69 @@ describe('LarkCliService commands', () => {
     });
   });
 
+  test('treats an auto-refreshable user token as still connected', () => {
+    const now = Date.parse('2026-10-14T10:00:00+08:00');
+    const user = {
+      status: 'needs_refresh',
+      available: true,
+      tokenStatus: 'needs_refresh',
+      refreshExpiresAt: '2026-10-20T15:15:43+08:00',
+    };
+    expect(isLarkUserTokenUsable(user, now)).toBe(true);
+    expect(isLarkUserTokenUsable({ ...user, refreshExpiresAt: '2026-10-13T00:00:00+08:00' }, now)).toBe(false);
+    expect(isLarkUserTokenUsable({ ...user, tokenStatus: 'expired' }, now)).toBe(false);
+    expect(isLarkUserTokenUsable({ ...user, available: false }, now)).toBe(false);
+  });
+
+  test('refreshes the user session instead of asking to rescan', async () => {
+    const env = createSystemCliFixture(tempDirs);
+    const cli = new LarkCliService(env);
+    const connectionRunner = buildConnectionRunner(
+      ALL_REQUIRED_SCOPES,
+      ALL_REQUIRED_SCOPES,
+      'needs_refresh',
+    );
+    const calls: string[][] = [];
+    Reflect.set(cli, 'run', async (args: string[]) => {
+      calls.push(args);
+      if (args[0] === 'api') return commandResult({ ok: true });
+      return connectionRunner(args);
+    });
+
+    const connection = await cli.getConnectionState();
+    expect(connection).toMatchObject({ status: 'connected', connected: true });
+    expect(calls).toContainEqual(buildLarkRefreshSessionArgs());
+  });
+
+  test('keeps an authorized session alive in the background', async () => {
+    const env = createSystemCliFixture(tempDirs);
+    const cli = new LarkCliService(env);
+    const calls: string[][] = [];
+    Reflect.set(cli, 'run', async (args: string[]) => {
+      calls.push(args);
+      if (args[0] === 'auth' && args[1] === 'status') {
+        expect(args).not.toContain('--verify');
+        return commandResult({
+          identities: { user: { status: 'needs_refresh', available: true, tokenStatus: 'needs_refresh' } },
+        });
+      }
+      if (args[0] === 'api') return commandResult({ ok: true });
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    expect(await cli.keepAlive()).toBe(false);
+    expect(calls).toEqual([]);
+
+    fs.writeFileSync(larkCliAuthorizationRecordPath(env), JSON.stringify({
+      authorizationMode: 'all',
+      scopeVersion: 1,
+      cliVersion: '9.9.9',
+      authorizedAt: '2026-07-30T08:00:00.000Z',
+    }));
+    expect(await cli.keepAlive()).toBe(true);
+    expect(calls).toContainEqual(buildLarkRefreshSessionArgs());
+  });
+
   test('uses user identity, v2 and stdin for document writes', () => {
     expect(buildFeishuCreateDocumentArgs('fldcn123')).toEqual([
       'docs',
@@ -267,6 +334,7 @@ function commandResult(stdout: unknown): MockCommandResult {
 function buildConnectionRunner(
   grantedScopes: string[],
   appScopes: string[],
+  userStatus = 'ready',
 ): (args: string[]) => Promise<MockCommandResult> {
   return async (args: string[]) => {
     if (args[0] === 'config') {
@@ -278,9 +346,9 @@ function buildConnectionRunner(
         identity: 'user',
         identities: {
           user: {
-            status: 'ready',
+            status: userStatus,
             available: true,
-            tokenStatus: 'valid',
+            tokenStatus: userStatus === 'ready' ? 'valid' : userStatus,
             userName: 'Test User',
             openId: 'ou_test',
             scope: grantedScopes.join(' '),
